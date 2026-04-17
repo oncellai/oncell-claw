@@ -4,12 +4,6 @@
  * Replaces NanoClaw's Docker container-runner. Instead of spawning Docker
  * containers, this creates/resumes OnCell cells per group. Each cell has
  * persistent storage, database, and shell access.
- *
- * Key differences from Docker runner:
- * - No volume mounts — files are uploaded/synced via OnCell API
- * - No IPC filesystem — uses OnCell's built-in database (ctx.db)
- * - Cells persist between invocations — no cold start
- * - Auto-pause when idle ($0.003/hr), resume in 200ms
  */
 import { ChildProcess } from 'child_process';
 import fs from 'fs';
@@ -40,61 +34,49 @@ function saveCellMap(map: Record<string, string>): void {
 }
 
 // Agent code that runs inside each cell
-const CELL_AGENT_CODE = `
-module.exports = {
-  async execute(ctx, params) {
-    const { prompt, sessionId, assistantName } = params;
-
-    // Write CLAUDE.md memory
-    if (params.claudeMd) {
-      ctx.store.write('CLAUDE.md', params.claudeMd);
-    }
-
-    // Store IPC data
-    if (params.tasks) ctx.db.set('ipc:tasks', params.tasks);
-    if (params.groups) ctx.db.set('ipc:groups', params.groups);
-
-    // Build claude command
-    let cmd = 'claude --print';
-    if (sessionId) cmd += ' --resume ' + sessionId;
-
-    const env = 'export ANTHROPIC_API_KEY="' + (process.env.ANTHROPIC_API_KEY || '') + '" && ';
-    const result = ctx.shell(env + 'echo ' + JSON.stringify(prompt) + ' | ' + cmd);
-
-    // Parse session ID from output
-    let newSessionId = sessionId;
-    const match = result.stdout.match(/Session ID: ([a-f0-9-]+)/);
-    if (match) newSessionId = match[1];
-
-    return {
-      status: result.exitCode === 0 ? 'success' : 'error',
-      result: result.stdout,
-      newSessionId,
-      error: result.exitCode !== 0 ? result.stderr : undefined,
-    };
-  },
-
-  async sync_files(ctx, params) {
-    for (const file of params.files || []) {
-      ctx.store.write(file.path, file.content);
-    }
-    return { synced: (params.files || []).length };
-  },
-};
-`;
+const CELL_AGENT_CODE = [
+  'module.exports = {',
+  '  async execute(ctx, params) {',
+  '    const { prompt, sessionId, assistantName } = params;',
+  '    if (params.claudeMd) ctx.store.write("CLAUDE.md", params.claudeMd);',
+  '    if (params.tasks) ctx.db.set("ipc:tasks", params.tasks);',
+  '    if (params.groups) ctx.db.set("ipc:groups", params.groups);',
+  '    let cmd = "claude --print";',
+  '    if (sessionId) cmd += " --resume " + sessionId;',
+  '    const envCmd = "export ANTHROPIC_API_KEY=\\"" + (process.env.ANTHROPIC_API_KEY || "") + "\\" && ";',
+  '    const result = ctx.shell(envCmd + "echo " + JSON.stringify(prompt) + " | " + cmd);',
+  '    let newSessionId = sessionId;',
+  '    const match = result.stdout.match(/Session ID: ([a-f0-9-]+)/);',
+  '    if (match) newSessionId = match[1];',
+  '    return {',
+  '      status: result.exitCode === 0 ? "success" : "error",',
+  '      result: result.stdout,',
+  '      newSessionId,',
+  '      error: result.exitCode !== 0 ? result.stderr : undefined,',
+  '    };',
+  '  },',
+  '  async sync_files(ctx, params) {',
+  '    for (const file of params.files || []) ctx.store.write(file.path, file.content);',
+  '    return { synced: (params.files || []).length };',
+  '  },',
+  '};',
+].join('\n');
 
 async function oncellFetch(method: string, apiPath: string, body?: unknown): Promise<any> {
-  const res = await fetch(\`\${ONCELL_BASE_URL}\${apiPath}\`, {
+  const url = ONCELL_BASE_URL + apiPath;
+  const headers: Record<string, string> = {
+    'Authorization': 'Bearer ' + ONCELL_API_KEY,
+  };
+  if (body) headers['Content-Type'] = 'application/json';
+
+  const res = await fetch(url, {
     method,
-    headers: {
-      'Authorization': \`Bearer \${ONCELL_API_KEY}\`,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 204) return undefined;
   const json = await res.json();
-  if (!res.ok) throw new Error(\`OnCell API error (\${res.status}): \${JSON.stringify(json)}\`);
+  if (!res.ok) throw new Error('OnCell API error (' + res.status + '): ' + JSON.stringify(json));
   return json;
 }
 
@@ -103,7 +85,7 @@ async function getOrCreateCell(groupFolder: string): Promise<string> {
 
   if (cellMap[groupFolder]) {
     try {
-      await oncellFetch('GET', \`/api/v1/cells/\${encodeURIComponent(cellMap[groupFolder])}\`);
+      await oncellFetch('GET', '/api/v1/cells/' + encodeURIComponent(cellMap[groupFolder]));
       return cellMap[groupFolder];
     } catch {
       delete cellMap[groupFolder];
@@ -112,7 +94,7 @@ async function getOrCreateCell(groupFolder: string): Promise<string> {
 
   logger.info({ group: groupFolder }, 'Creating OnCell cell for group');
   const cell = await oncellFetch('POST', '/api/v1/cells', {
-    customer_id: \`claw-\${groupFolder}\`,
+    customer_id: 'claw-' + groupFolder,
     tier: 'starter',
     permanent: true,
     agent: CELL_AGENT_CODE,
@@ -159,10 +141,10 @@ export async function runContainerAgent(
     cellId = await getOrCreateCell(group.folder);
   } catch (err: any) {
     logger.error({ group: group.name, error: err.message }, 'Failed to get/create cell');
-    return { status: 'error', result: null, error: \`Cell creation failed: \${err.message}\` };
+    return { status: 'error', result: null, error: 'Cell creation failed: ' + err.message };
   }
 
-  const cellName = \`oncell-\${group.folder}\`;
+  const cellName = 'oncell-' + group.folder;
   onProcess(null as any, cellName);
 
   logger.info({ group: group.name, cellId, isMain: input.isMain }, 'Executing in OnCell cell');
@@ -180,10 +162,10 @@ export async function runContainerAgent(
     const walk = (dir: string, prefix: string) => {
       for (const f of fs.readdirSync(dir)) {
         const full = path.join(dir, f);
-        const rel = prefix ? \`\${prefix}/\${f}\` : f;
+        const rel = prefix ? prefix + '/' + f : f;
         if (fs.statSync(full).isDirectory()) walk(full, rel);
         else {
-          try { filesToSync.push({ path: \`group/\${rel}\`, content: fs.readFileSync(full, 'utf8') }); }
+          try { filesToSync.push({ path: 'group/' + rel, content: fs.readFileSync(full, 'utf8') }); }
           catch { /* skip binary */ }
         }
       }
@@ -193,7 +175,7 @@ export async function runContainerAgent(
 
   if (filesToSync.length > 0) {
     try {
-      await oncellFetch('POST', \`/api/v1/cells/\${encodeURIComponent(cellId)}/request\`, {
+      await oncellFetch('POST', '/api/v1/cells/' + encodeURIComponent(cellId) + '/request', {
         method: 'sync_files', params: { files: filesToSync },
       });
     } catch (err: any) {
@@ -203,7 +185,7 @@ export async function runContainerAgent(
 
   // Execute
   try {
-    const result = await oncellFetch('POST', \`/api/v1/cells/\${encodeURIComponent(cellId)}/request\`, {
+    const result = await oncellFetch('POST', '/api/v1/cells/' + encodeURIComponent(cellId) + '/request', {
       method: 'execute',
       params: {
         prompt: input.prompt,
@@ -230,7 +212,7 @@ export async function runContainerAgent(
   } catch (err: any) {
     const duration = Date.now() - startTime;
     logger.error({ group: group.name, cellId, duration, error: err.message }, 'Cell execution failed');
-    return { status: 'error', result: null, error: \`Cell execution failed: \${err.message}\` };
+    return { status: 'error', result: null, error: 'Cell execution failed: ' + err.message };
   }
 }
 

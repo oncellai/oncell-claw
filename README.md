@@ -20,6 +20,21 @@ A fork of [NanoClaw](https://github.com/qwibitai/nanoclaw) by [Gavriel Cohen](ht
 
 ## Quick Start
 
+### Prerequisites
+
+- **Node.js 22** (required — `better-sqlite3` doesn't build on Node 25+)
+
+```bash
+# Install via nvm:
+nvm install 22 && nvm use 22
+# Or via fnm:
+fnm use 22
+# Verify:
+node --version  # must be v22.x
+```
+
+### Setup
+
 ```bash
 git clone https://github.com/oncellai/oncell-claw.git
 cd oncell-claw
