@@ -9,10 +9,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import {
-  CONTAINER_TIMEOUT,
-  DATA_DIR,
-} from './config.js';
+import { CONTAINER_TIMEOUT, DATA_DIR } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -25,8 +22,11 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 // Track cell IDs per group
 const cellMapPath = path.join(DATA_DIR, 'oncell-cells.json');
 function loadCellMap(): Record<string, string> {
-  try { return JSON.parse(fs.readFileSync(cellMapPath, 'utf8')); }
-  catch { return {}; }
+  try {
+    return JSON.parse(fs.readFileSync(cellMapPath, 'utf8'));
+  } catch {
+    return {};
+  }
 }
 function saveCellMap(map: Record<string, string>): void {
   fs.mkdirSync(path.dirname(cellMapPath), { recursive: true });
@@ -62,10 +62,14 @@ const CELL_AGENT_CODE = [
   '};',
 ].join('\n');
 
-async function oncellFetch(method: string, apiPath: string, body?: unknown): Promise<any> {
+async function oncellFetch(
+  method: string,
+  apiPath: string,
+  body?: unknown,
+): Promise<any> {
   const url = ONCELL_BASE_URL + apiPath;
   const headers: Record<string, string> = {
-    'Authorization': 'Bearer ' + ONCELL_API_KEY,
+    Authorization: 'Bearer ' + ONCELL_API_KEY,
   };
   if (body) headers['Content-Type'] = 'application/json';
 
@@ -76,7 +80,10 @@ async function oncellFetch(method: string, apiPath: string, body?: unknown): Pro
   });
   if (res.status === 204) return undefined;
   const json = await res.json();
-  if (!res.ok) throw new Error('OnCell API error (' + res.status + '): ' + JSON.stringify(json));
+  if (!res.ok)
+    throw new Error(
+      'OnCell API error (' + res.status + '): ' + JSON.stringify(json),
+    );
   return json;
 }
 
@@ -85,7 +92,10 @@ async function getOrCreateCell(groupFolder: string): Promise<string> {
 
   if (cellMap[groupFolder]) {
     try {
-      await oncellFetch('GET', '/api/v1/cells/' + encodeURIComponent(cellMap[groupFolder]));
+      await oncellFetch(
+        'GET',
+        '/api/v1/cells/' + encodeURIComponent(cellMap[groupFolder]),
+      );
       return cellMap[groupFolder];
     } catch {
       delete cellMap[groupFolder];
@@ -140,14 +150,24 @@ export async function runContainerAgent(
   try {
     cellId = await getOrCreateCell(group.folder);
   } catch (err: any) {
-    logger.error({ group: group.name, error: err.message }, 'Failed to get/create cell');
-    return { status: 'error', result: null, error: 'Cell creation failed: ' + err.message };
+    logger.error(
+      { group: group.name, error: err.message },
+      'Failed to get/create cell',
+    );
+    return {
+      status: 'error',
+      result: null,
+      error: 'Cell creation failed: ' + err.message,
+    };
   }
 
   const cellName = 'oncell-' + group.folder;
   onProcess(null as any, cellName);
 
-  logger.info({ group: group.name, cellId, isMain: input.isMain }, 'Executing in OnCell cell');
+  logger.info(
+    { group: group.name, cellId, isMain: input.isMain },
+    'Executing in OnCell cell',
+  );
 
   // Read CLAUDE.md
   let claudeMd = '';
@@ -165,8 +185,14 @@ export async function runContainerAgent(
         const rel = prefix ? prefix + '/' + f : f;
         if (fs.statSync(full).isDirectory()) walk(full, rel);
         else {
-          try { filesToSync.push({ path: 'group/' + rel, content: fs.readFileSync(full, 'utf8') }); }
-          catch { /* skip binary */ }
+          try {
+            filesToSync.push({
+              path: 'group/' + rel,
+              content: fs.readFileSync(full, 'utf8'),
+            });
+          } catch {
+            /* skip binary */
+          }
         }
       }
     };
@@ -175,9 +201,14 @@ export async function runContainerAgent(
 
   if (filesToSync.length > 0) {
     try {
-      await oncellFetch('POST', '/api/v1/cells/' + encodeURIComponent(cellId) + '/request', {
-        method: 'sync_files', params: { files: filesToSync },
-      });
+      await oncellFetch(
+        'POST',
+        '/api/v1/cells/' + encodeURIComponent(cellId) + '/request',
+        {
+          method: 'sync_files',
+          params: { files: filesToSync },
+        },
+      );
     } catch (err: any) {
       logger.warn({ error: err.message }, 'Failed to sync files to cell');
     }
@@ -185,19 +216,26 @@ export async function runContainerAgent(
 
   // Execute
   try {
-    const result = await oncellFetch('POST', '/api/v1/cells/' + encodeURIComponent(cellId) + '/request', {
-      method: 'execute',
-      params: {
-        prompt: input.prompt,
-        sessionId: input.sessionId,
-        groupFolder: group.folder,
-        assistantName: input.assistantName,
-        claudeMd,
+    const result = await oncellFetch(
+      'POST',
+      '/api/v1/cells/' + encodeURIComponent(cellId) + '/request',
+      {
+        method: 'execute',
+        params: {
+          prompt: input.prompt,
+          sessionId: input.sessionId,
+          groupFolder: group.folder,
+          assistantName: input.assistantName,
+          claudeMd,
+        },
       },
-    });
+    );
 
     const duration = Date.now() - startTime;
-    logger.info({ group: group.name, cellId, duration, status: result.status }, 'Cell execution completed');
+    logger.info(
+      { group: group.name, cellId, duration, status: result.status },
+      'Cell execution completed',
+    );
 
     const output: ContainerOutput = {
       status: result.status || 'success',
@@ -211,8 +249,15 @@ export async function runContainerAgent(
     return output;
   } catch (err: any) {
     const duration = Date.now() - startTime;
-    logger.error({ group: group.name, cellId, duration, error: err.message }, 'Cell execution failed');
-    return { status: 'error', result: null, error: 'Cell execution failed: ' + err.message };
+    logger.error(
+      { group: group.name, cellId, duration, error: err.message },
+      'Cell execution failed',
+    );
+    return {
+      status: 'error',
+      result: null,
+      error: 'Cell execution failed: ' + err.message,
+    };
   }
 }
 
@@ -220,27 +265,49 @@ export function writeTasksSnapshot(
   groupFolder: string,
   isMain: boolean,
   tasks: Array<{
-    id: string; groupFolder: string; prompt: string; script?: string | null;
-    schedule_type: string; schedule_value: string; status: string; next_run: string | null;
+    id: string;
+    groupFolder: string;
+    prompt: string;
+    script?: string | null;
+    schedule_type: string;
+    schedule_value: string;
+    status: string;
+    next_run: string | null;
   }>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
-  const filtered = isMain ? tasks : tasks.filter((t) => t.groupFolder === groupFolder);
-  fs.writeFileSync(path.join(groupIpcDir, 'current_tasks.json'), JSON.stringify(filtered, null, 2));
+  const filtered = isMain
+    ? tasks
+    : tasks.filter((t) => t.groupFolder === groupFolder);
+  fs.writeFileSync(
+    path.join(groupIpcDir, 'current_tasks.json'),
+    JSON.stringify(filtered, null, 2),
+  );
 }
 
 export interface AvailableGroup {
-  jid: string; name: string; lastActivity: string; isRegistered: boolean;
+  jid: string;
+  name: string;
+  lastActivity: string;
+  isRegistered: boolean;
 }
 
 export function writeGroupsSnapshot(
-  groupFolder: string, isMain: boolean,
-  groups: AvailableGroup[], _registeredJids: Set<string>,
+  groupFolder: string,
+  isMain: boolean,
+  groups: AvailableGroup[],
+  _registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
   const visibleGroups = isMain ? groups : [];
-  fs.writeFileSync(path.join(groupIpcDir, 'available_groups.json'),
-    JSON.stringify({ groups: visibleGroups, lastSync: new Date().toISOString() }, null, 2));
+  fs.writeFileSync(
+    path.join(groupIpcDir, 'available_groups.json'),
+    JSON.stringify(
+      { groups: visibleGroups, lastSync: new Date().toISOString() },
+      null,
+      2,
+    ),
+  );
 }
