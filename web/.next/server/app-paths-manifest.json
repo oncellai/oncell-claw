@@ -1,7 +1,0 @@
-{
-  "/api/launch/route": "app/api/launch/route.js",
-  "/_not-found/page": "app/_not-found/page.js",
-  "/api/status/route": "app/api/status/route.js",
-  "/dashboard/page": "app/dashboard/page.js",
-  "/page": "app/page.js"
-}
