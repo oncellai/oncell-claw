@@ -10,8 +10,18 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'ONECLI_API_KEY',
+  'ONCELL_API_KEY',
+  'ANTHROPIC_API_KEY',
   'TZ',
 ]);
+
+// OnCell keys — load from .env into process.env so container-runtime.ts can access them
+if (envConfig.ONCELL_API_KEY && !process.env.ONCELL_API_KEY) {
+  process.env.ONCELL_API_KEY = envConfig.ONCELL_API_KEY;
+}
+if (envConfig.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+  process.env.ANTHROPIC_API_KEY = envConfig.ANTHROPIC_API_KEY;
+}
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
