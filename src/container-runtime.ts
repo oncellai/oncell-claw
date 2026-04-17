@@ -1,102 +1,62 @@
 /**
- * Container runtime abstraction for NanoClaw.
- * All runtime-specific logic lives here so swapping runtimes means changing one file.
+ * Container runtime abstraction for OnCell-Claw.
+ * Replaces Docker with OnCell cells — each group gets a persistent cell.
+ *
+ * OnCell cells provide: persistent filesystem, database, search, shell access.
+ * No Docker required. Each cell auto-pauses when idle and resumes in 200ms.
  */
-import { execSync } from 'child_process';
-import os from 'os';
-
 import { logger } from './logger.js';
 
-/** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+// OnCell replaces Docker — no container binary needed
+export const CONTAINER_RUNTIME_BIN = 'oncell';
 
-/** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
-  }
-  return [];
+  return []; // Not needed — OnCell cells have full network access
 }
 
-/** Returns CLI args for a readonly bind mount. */
 export function readonlyMountArgs(
-  hostPath: string,
-  containerPath: string,
+  _hostPath: string,
+  _containerPath: string,
 ): string[] {
-  return ['-v', `${hostPath}:${containerPath}:ro`];
+  return []; // Not needed — files are uploaded to cells via API
 }
 
-/** Stop a container by name. Uses execFileSync to avoid shell injection. */
-export function stopContainer(name: string): void {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
-    throw new Error(`Invalid container name: ${name}`);
-  }
-  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
+export function stopContainer(_name: string): void {
+  // OnCell cells auto-pause — no manual stop needed
+  logger.debug({ name: _name }, 'Cell auto-pauses when idle');
 }
 
-/** Ensure the container runtime is running, starting it if needed. */
 export function ensureContainerRuntimeRunning(): void {
-  try {
-    execSync(`${CONTAINER_RUNTIME_BIN} info`, {
-      stdio: 'pipe',
-      timeout: 10000,
-    });
-    logger.debug('Container runtime already running');
-  } catch (err) {
-    logger.error({ err }, 'Failed to reach container runtime');
+  // OnCell is a cloud service — always available
+  const apiKey = process.env.ONCELL_API_KEY;
+  if (!apiKey) {
     console.error(
       '\n╔════════════════════════════════════════════════════════════════╗',
     );
     console.error(
-      '║  FATAL: Container runtime failed to start                      ║',
+      '║  FATAL: ONCELL_API_KEY not set                                ║',
     );
     console.error(
       '║                                                                ║',
     );
     console.error(
-      '║  Agents cannot run without a container runtime. To fix:        ║',
+      '║  OnCell-Claw uses OnCell instead of Docker.                   ║',
     );
     console.error(
-      '║  1. Ensure Docker is installed and running                     ║',
+      '║  Get an API key at https://oncell.ai                          ║',
     );
     console.error(
-      '║  2. Run: docker info                                           ║',
-    );
-    console.error(
-      '║  3. Restart NanoClaw                                           ║',
+      '║  Then set ONCELL_API_KEY in your .env file.                   ║',
     );
     console.error(
       '╚════════════════════════════════════════════════════════════════╝\n',
     );
-    throw new Error('Container runtime is required but failed to start', {
-      cause: err,
-    });
+    throw new Error('ONCELL_API_KEY is required');
   }
+  logger.info('OnCell runtime ready');
 }
 
-/** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
-  try {
-    const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
-      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
-    );
-    const orphans = output.trim().split('\n').filter(Boolean);
-    for (const name of orphans) {
-      try {
-        stopContainer(name);
-      } catch {
-        /* already stopped */
-      }
-    }
-    if (orphans.length > 0) {
-      logger.info(
-        { count: orphans.length, names: orphans },
-        'Stopped orphaned containers',
-      );
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
-  }
+  // OnCell cells auto-pause — no orphan cleanup needed
+  logger.debug('OnCell cells auto-pause when idle — no orphan cleanup needed');
 }
