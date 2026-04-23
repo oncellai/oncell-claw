@@ -11,7 +11,7 @@ module.exports = {
     if (params.groups) ctx.db.set("ipc:groups", params.groups);
     let cmd = "claude --print";
     if (sessionId) cmd += " --resume " + sessionId;
-    const envCmd = "export ANTHROPIC_API_KEY=\"" + (process.env.ANTHROPIC_API_KEY || "") + "\" && ";
+    const envCmd = "export PATH=\"/usr/local/bin:/usr/bin:/bin:$PATH\" ANTHROPIC_API_KEY=\"" + (process.env.ANTHROPIC_API_KEY || "") + "\" && ";
     const result = ctx.shell(envCmd + "echo " + JSON.stringify(prompt) + " | " + cmd);
     let newSessionId = sessionId;
     const match = result.stdout.match(/Session ID: ([a-f0-9-]+)/);
